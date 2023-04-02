@@ -362,6 +362,8 @@ mod_init(struct module *const restrict m)
 	(void) hook_add_db_write(&db_write_hook);
 
 	(void) db_register_type_handler(JOINRATE_DBENTRY_INST, &db_read_hook);
+
+	m->mflags |= MODFLAG_DBHANDLER;
 }
 
 static void
