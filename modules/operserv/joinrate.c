@@ -106,11 +106,14 @@ channel_join_hook(struct hook_channel_joinpart *const restrict hdata)
 	return_if_fail(hdata->cu != NULL);
 	return_if_fail(hdata->cu->chan != NULL);
 	return_if_fail(hdata->cu->chan->name != NULL);
+	return_if_fail(hdata->cu->user != NULL);
+	return_if_fail(hdata->cu->user->server != NULL);
 
 	const char *const chname = hdata->cu->chan->name;
+	struct user *const userptr = hdata->cu->user;
 
-	// Don't count JOINs in a netjoin
-	if (me.bursting)
+	// Don't count JOINs in a netjoin, or from our clients
+	if (is_internal_client(userptr) || me.bursting || ! (userptr->server->flags & SF_EOB))
 		return;
 
 	struct jr_instance *const instance = jr_instance_retrieve_or_create(chname);
