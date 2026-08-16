@@ -67,13 +67,22 @@ ns_cmd_setpass(struct sourceinfo *si, int parc, char *parv[])
 		return;
 	}
 
-	logcommand(si, CMDLOG_SET, "SETPASS: \2%s\2", entity(mu)->name);
+	if (! set_password(mu, password))
+	{
+		(void) command_fail(si, fault_internalerror, _("There was an error setting your password. Please "
+		                                               "check it for any invalid characters and contact "
+		                                               "network staff if the issue persists."));
+
+		(void) logcommand(si, CMDLOG_SET, "failed SETPASS (password encryption failure)");
+		return;
+	}
 
 	metadata_delete(mu, "private:setpass:key");
 	metadata_delete(mu, "private:sendpass:sender");
 	metadata_delete(mu, "private:sendpass:timestamp");
 
-	set_password(mu, password);
+	logcommand(si, CMDLOG_SET, "SETPASS: \2%s\2", entity(mu)->name);
+
 	command_success_nodata(si, _("The password for \2%s\2 has been successfully changed."), entity(mu)->name);
 
 	if (mu->flags & MU_NOPASSWORD)
@@ -117,7 +126,7 @@ show_setpass(struct hook_user_req *hdata)
 			struct tm *tm;
 
 			md = metadata_find(hdata->mu, "private:sendpass:timestamp");
-			ts = md != NULL ? atoi(md->value) : 0;
+			ts = md != NULL ? atoll(md->value) : 0;
 
 			tm = localtime(&ts);
 			strftime(strfbuf, sizeof strfbuf, TIME_FORMAT, tm);

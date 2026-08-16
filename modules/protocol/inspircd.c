@@ -10,8 +10,7 @@
 #include <atheme.h>
 #include <atheme/protocol/inspircd.h>
 
-#define PROTOCOL_MINIMUM 1202 // we do not support anything older than this
-#define PROTOCOL_PREFERRED_STR "1202"
+#define PROTOCOL_MINIMUM 1205 // we do not support anything older than this
 
 static struct ircd InspIRCd = {
 	.ircdname = "InspIRCd",
@@ -211,7 +210,7 @@ sid_find(const char *name)
 static inline void
 channel_metadata_sts(struct channel *c, const char *key, const char *value)
 {
-	sts(":%s METADATA %s %s :%s", ME, c->name, key, value);
+	sts(":%s METADATA %s %lu %s :%s", ME, c->name, (unsigned long)c->ts, key, value);
 }
 
 static bool
@@ -354,10 +353,10 @@ inspircd_server_login(void)
 	ircd->uses_protect = false;
 	ircd->uses_halfops = false;
 
-	ret = sts("CAPAB START " PROTOCOL_PREFERRED_STR);
+	ret = sts("CAPAB START %u", PROTOCOL_MINIMUM);
 	if (ret == 1)
 		return 1;
-	sts("CAPAB CAPABILITIES :PROTOCOL=" PROTOCOL_PREFERRED_STR);
+	sts("CAPAB CAPABILITIES :CASEMAPPING=%s", match_mapping == MATCH_ASCII ? "ascii" : "rfc1459");
 	sts("CAPAB END");
 	sts("SERVER %s %s 0 %s :%s", me.name, curr_uplink->send_pass, me.numeric, me.desc);
 
@@ -370,7 +369,7 @@ inspircd_introduce_nick(struct user *u)
 {
 	// :penguin.omega.org.za UID 497AAAAAB 1188302517 OperServ 127.0.0.1 127.0.0.1 OperServ +s 127.0.0.1 :Operator Server
 	const char *umode = user_get_umodestr(u);
-	const bool send_oper = (is_ircop(u) && !has_servprotectmod);
+	const bool send_oper = is_ircop(u);
 
 	sts(":%s UID %s %lu %s %s %s %s 0.0.0.0 %lu %s%s%s%s :%s", me.numeric, u->uid, (unsigned long)u->ts, u->nick, u->host, u->host, u->user, (unsigned long)u->ts, umode, (send_oper && has_hideopermod) ? "H" : "", has_hidechansmod ? "I" : "", has_servprotectmod ? "k" : "", u->gecos);
 	if (send_oper)
@@ -386,6 +385,9 @@ inspircd_quit_sts(struct user *u, const char *reason)
 static void
 inspircd_wallops_sts(const char *text)
 {
+	if (!me.recvsvr)
+		return; // not allowed until connected
+
 	if (has_globopsmod)
 		sts(":%s SNONOTICE g :%s", me.numeric, text);
 	else
@@ -467,7 +469,7 @@ inspircd_numeric_sts(struct server *from, int numeric, struct user *target, cons
 	vsnprintf(buf, BUFSIZE, fmt, ap);
 	va_end(ap);
 
-	sts(":%s PUSH %s ::%s %d %s %s", from->sid, target->uid, from->name, numeric, target->nick, buf);
+	sts(":%s NUM %s %s %d %s", from->sid, from->sid, target->uid, numeric, buf);
 }
 
 static void
@@ -518,7 +520,7 @@ inspircd_qline_sts(const char *server, const char *name, long duration, const ch
 	}
 
 	if (has_cbanmod)
-		sts(":%s CBAN %s %ld :%s", svs != NULL ? svs->me->uid : ME, name, duration, reason);
+		sts(":%s ADDLINE CBAN %s %s %lu %ld :%s", me.numeric, name, svs != NULL ? svs->nick : me.name, (unsigned long)CURRTIME, duration, reason);
 	else
 		slog(LG_INFO, "SQLINE: Could not set SQLINE on \2%s\2 due to m_cban not being loaded in inspircd.", name);
 }
@@ -533,7 +535,7 @@ inspircd_unqline_sts(const char *server, const char *name)
 	}
 
 	if (has_cbanmod)
-		sts(":%s CBAN %s", ME, name);
+		sts(":%s DELLINE CBAN %s", ME, name);
 	else
 		slog(LG_INFO, "SQLINE: Could not remove SQLINE on \2%s\2 due to m_cban not being loaded in inspircd.", name);
 }
@@ -576,14 +578,14 @@ inspircd_topic_sts(struct channel *c, struct user *source, const char *setter, t
 	// Restoring old topic
 	if (ts > prevts + SECONDS_PER_MINUTE || prevts == 0)
 	{
-		sts(":%s FTOPIC %s %lu %s :%s", source->uid, c->name, (unsigned long)ts, setter, topic);
+		sts(":%s FTOPIC %s %lu %lu %s :%s", source->uid, c->name, (unsigned long)c->ts, (unsigned long)ts, setter, topic);
 		return;
 	}
 	// Tweaking a topic
 	else if (ts == prevts)
 	{
 		ts -= SECONDS_PER_MINUTE;
-		sts(":%s FTOPIC %s %lu %s :%s", source->uid, c->name, (unsigned long)ts, setter, topic);
+		sts(":%s FTOPIC %s %lu %lu %s :%s", source->uid, c->name, (unsigned long)c->ts, (unsigned long)ts, setter, topic);
 		c->topicts = ts;
 		return;
 	}
@@ -616,18 +618,20 @@ inspircd_ping_sts(void)
 	if (!u)
 		return;
 
-	sts(":%s PING %s :%s", me.numeric, me.numeric, u->sid);
+	sts(":%s PING %s", me.numeric, u->sid);
 }
 
 static void
 inspircd_on_login(struct user *u, struct myuser *mu, const char *wantedhost)
 {
+	sts(":%s METADATA %s accountid :%s", me.numeric, u->uid, config_options.show_entity_id ? entity(mu)->id : "");
 	sts(":%s METADATA %s accountname :%s", me.numeric, u->uid, entity(mu)->name);
 }
 
 static bool
 inspircd_on_logout(struct user *u, const char *account)
 {
+	sts(":%s METADATA %s accountid :", me.numeric, u->uid);
 	sts(":%s METADATA %s accountname :", me.numeric, u->uid);
 	return false;
 }
@@ -680,7 +684,7 @@ inspircd_jupe(const char *server, const char *reason)
 		}
 	} while (server_find(sid));
 
-	sts(":%s SERVER %s * 1 %s :%s", me.numeric, server, sid, reason);
+	sts(":%s SERVER %s %s :%s", me.numeric, server, sid, reason);
 }
 
 static void
@@ -708,7 +712,7 @@ inspircd_fnc_sts(struct user *source, struct user *u, const char *newnick, int t
 static void
 inspircd_invite_sts(struct user *sender, struct user *target, struct channel *channel)
 {
-	sts(":%s INVITE %s %s", sender->uid, target->uid, channel->name);
+	sts(":%s INVITE %s %s %lu", sender->uid, target->uid, channel->name, (unsigned long)channel->ts);
 }
 
 static void
@@ -794,21 +798,11 @@ inspircd_topiclock_sts(struct channel *c)
 }
 
 static void
-m_topic(struct sourceinfo *si, int parc, char *parv[])
-{
-	struct channel *c = channel_find(parv[0]);
-
-	if (!c)
-		return;
-
-	handle_topic_from(si, c, si->su->nick, time(NULL), parv[1]);
-}
-
-static void
 m_ftopic(struct sourceinfo *si, int parc, char *parv[])
 {
 	struct channel *c = channel_find(parv[0]);
-	time_t ts = atol(parv[1]);
+	time_t ts = atoll(parv[2]);
+	const char *setter;
 
 	if (!c)
 		return;
@@ -819,17 +813,25 @@ m_ftopic(struct sourceinfo *si, int parc, char *parv[])
 		return;
 	}
 
-	handle_topic_from(si, c, parv[2], ts, parv[3]);
+	if (si->su)
+	{
+		// topic is being set by a user
+		setter = si->su->nick;
+	}
+	else
+	{
+		// topic is being set by a server on burst
+		setter = parv[3];
+	}
+
+	handle_topic_from(si, c, setter, ts, parv[parc - 1]);
 }
 
 static void
 m_ping(struct sourceinfo *si, int parc, char *parv[])
 {
 	// reply to PINGs
-	if (parc == 1)
-		sts(":%s PONG %s", me.numeric, parv[0]);
-	else if (parc == 2)
-		sts(":%s PONG %s :%s", me.numeric, parv[1], parv[0]);
+	sts(":%s PONG %s", me.numeric, si->s->sid);
 }
 
 static void
@@ -837,23 +839,16 @@ m_pong(struct sourceinfo *si, int parc, char *parv[])
 {
 	struct server *s;
 
-	if (!parv[1])
-		return;
 	s = server_find(parv[0]);
-	if (!s || s == me.me)
+	if (!s || s != me.me)
 	{
-		TAINT_ON(s = server_find(parv[1]), "inspircd bug #90 causes possible state desync -- upgrade your software");
-		if (!s || s == me.me)
-			return;
+		slog(LG_DEBUG, "m_pong(): received unexpected PONG for %s", parv[0]);
+		return;
 	}
 
-	handle_eob(s);
+	handle_eob(si->s);
 
 	me.uplinkpong = CURRTIME;
-
-	// if pong source isn't origin, this isn't a complete burst. --nenolod
-	if (s != si->s)
-		return;
 
 	// -> :test.projectxero.net PONG test.projectxero.net :shrike.malkier.net
 	if (me.bursting)
@@ -915,6 +910,7 @@ map_a_prefix(char prefix, char* prefixandnick, unsigned int *nlen)
 			{
 				if (status_mode_list[j].value == prefix_mode_list[k].value)
 				{
+					slog(LG_DEBUG, "map_a_prefix(): %c -> %c", prefix, prefix_mode_list[k].mode);
 					prefixandnick[*nlen] = prefix_mode_list[k].mode;
 					(*nlen)++;
 					return;
@@ -939,7 +935,7 @@ m_fjoin(struct sourceinfo *si, int parc, char *parv[])
 	time_t ts;
 
 	c = channel_find(parv[0]);
-	ts = atol(parv[1]);
+	ts = atoll(parv[1]);
 
 	if (!c)
 	{
@@ -1019,6 +1015,11 @@ m_fjoin(struct sourceinfo *si, int parc, char *parv[])
 				// yup, skip over the comma
 				userv[i]++;
 
+				// we dont handle membership ids so it can just be thrown away
+				char *membid = strchr(userv[i], ':');
+				if (membid != NULL)
+					*membid = '\0';
+
 				// if we're ignoring status (keep_new_modes is false) then just add them to chan here...
 				if (keep_new_modes == false)
 				{
@@ -1049,6 +1050,38 @@ m_fjoin(struct sourceinfo *si, int parc, char *parv[])
 }
 
 static void
+m_ijoin(struct sourceinfo *si, int parc, char *parv[])
+{
+	// :<uid> IJOIN <chan> <membid> [<ts> [<flags>]]
+	struct channel *c;
+	char prefixandnick[51];
+	unsigned int plen;
+
+	c = channel_find(parv[0]);
+	if (c == NULL)
+	{
+		sts(":%s RESYNC :%s", me.numeric, parv[0]);
+		return;
+	}
+
+	if (parc < 4)
+	{
+		chanuser_add(c, si->su->nick);
+		return;
+	}
+
+	plen = 0;
+	for (; *parv[3]; parv[3]++)
+	{
+		// atheme wants prefix characters but inspircd sends prefix modes
+		map_a_prefix(*parv[3], prefixandnick, &plen);
+	}
+
+	mowgli_strlcpy(prefixandnick + plen, si->su->nick, sizeof(prefixandnick) - plen);
+	chanuser_add(c, prefixandnick);
+}
+
+static void
 m_part(struct sourceinfo *si, int parc, char *parv[])
 {
 	slog(LG_DEBUG, "m_part(): user left channel: %s -> %s", si->su->nick, parv[0]);
@@ -1069,7 +1102,7 @@ m_uid(struct sourceinfo *si, int parc, char *parv[])
 	slog(LG_DEBUG, "m_uid(): new user on `%s': %s", si->s->name, parv[2]);
 
 	//            nick,    user,    host,    vhost,    ip,      uid,        gecos,    server,       ts
-	u = user_add(parv[2], parv[5], parv[3], parv[4], parv[6], parv[0], parv[parc - 1], si->s, atol(parv[1]));
+	u = user_add(parv[2], parv[5], parv[3], parv[4], parv[6], parv[0], parv[parc - 1], si->s, atoll(parv[1]));
 
 	if (u == NULL)
 		return;
@@ -1086,7 +1119,7 @@ m_nick(struct sourceinfo *si, int parc, char *parv[])
 {
 	slog(LG_DEBUG, "m_nick(): nickname change from `%s': %s", si->su->nick, parv[0]);
 
-	if (user_changenick(si->su, parv[0], atoi(parv[1])))
+	if (user_changenick(si->su, parv[0], atoll(parv[1])))
 		return;
 
 	/* It could happen that our PING arrived late and the
@@ -1169,7 +1202,7 @@ m_fmode(struct sourceinfo *si, int parc, char *parv[])
 			slog(LG_DEBUG, "m_fmode(): nonexistent channel: %s", parv[0]);
 			return;
 		}
-		ts = atoi(parv[1]);
+		ts = atoll(parv[1]);
 		if (ts > c->ts)
 		{
 			return;
@@ -1243,12 +1276,26 @@ m_server(struct sourceinfo *si, int parc, char *parv[])
 	{
 		sts(":%s BURST", me.numeric);
 		get_version_string(ver, sizeof(ver));
-		sts(":%s VERSION :%s", me.numeric, ver);
+		sts(":%s SINFO version :%s", me.numeric, ver);
+		sts(":%s SINFO fullversion :[%s] %s", me.numeric, me.numeric, ver);
+		sts(":%s SINFO rawversion :%s-%s", me.numeric, PACKAGE_TARNAME, PACKAGE_VERSION);
 		services_init();
 		sts(":%s ENDBURST", me.numeric);
-	}
 
-	handle_server(si, parv[0], parv[3], atoi(parv[2]), parv[4]);
+		// SERVER <name> <password> <hops> <sid> :<description>
+		if (parc < 5)
+		{
+			(void) slog(LG_ERROR, "%s: received local SERVER command with %d parameters",
+			                      MOWGLI_FUNC_NAME, parc);
+			return;
+		}
+		handle_server(si, parv[0], parv[3], atoi(parv[2]), parv[4]);
+	}
+	else
+	{
+		// SERVER <name> <sid> [<attrs>...] :<description>
+		handle_server(si, parv[0], parv[1], 0, parv[parc - 1]);
+	}
 }
 
 static inline void
@@ -1256,7 +1303,7 @@ solicit_pongs(struct server *s)
 {
 	mowgli_node_t *n;
 
-	sts(":%s PING %s %s", me.numeric, me.numeric, s->sid);
+	sts(":%s PING %s", me.numeric, s->sid);
 
 	MOWGLI_ITER_FOREACH(n, s->children.head)
 		solicit_pongs(n->data);
@@ -1290,22 +1337,6 @@ static void
 m_away(struct sourceinfo *si, int parc, char *parv[])
 {
 	handle_away(si->su, parc >= 1 ? parv[parc-1] : NULL);
-}
-
-static void
-m_join(struct sourceinfo *si, int parc, char *parv[])
-{
-	struct channel *c;
-
-	c = channel_find(parv[0]);
-	if (!c)
-	{
-		slog(LG_DEBUG, "m_join(): new channel: %s (modes lost)", parv[0]);
-		c = channel_add(parv[0], parc > 1 ? atol(parv[1]) : CURRTIME, si->su->server);
-		return_if_fail(c != NULL);
-		channel_mode_va(NULL, c, 1, "+");
-	}
-	chanuser_add(c, si->su->nick);
 }
 
 static void
@@ -1469,7 +1500,7 @@ m_metadata(struct sourceinfo *si, int parc, char *parv[])
 	if (parc > 3)
 	{
 		c = channel_find(parv[0]);
-		ts = atoi(parv[1]);
+		ts = atoll(parv[1]);
 
 		if (!irccasecmp(parv[2], "mlock"))
 			verify_mlock(c, ts, parv[3]);
@@ -1579,12 +1610,7 @@ m_capab(struct sourceinfo *si, int parc, char *parv[])
 		 */
 		if (parc > 1)
 			has_protocol = atoi(parv[1]);
-		if (has_protocol == 1203 || has_protocol == 1204)
-		{
-			slog(LG_ERROR, "m_capab(): InspIRCd 2.1 beta is not supported.");
-			exit(EXIT_FAILURE);
-		}
-		else if (has_protocol < PROTOCOL_MINIMUM)
+		if (has_protocol < PROTOCOL_MINIMUM)
 		{
 			slog(LG_ERROR, "m_capab(): remote protocol version too old (%d). you may need another protocol module or a newer inspircd. exiting.", has_protocol);
 			exit(EXIT_FAILURE);
@@ -1595,22 +1621,7 @@ m_capab(struct sourceinfo *si, int parc, char *parv[])
 		varc = sjtoken(parv[1], ' ', varv);
 		for (i = 0; i < varc; i++)
 		{
-			if(!strncmp(varv[i], "PREFIX=", 7))
-			{
-				if (strstr(varv[i] + 7, "q"))
-				{
-					ircd->uses_owner = true;
-				}
-				if (strstr(varv[i] + 7, "a"))
-				{
-					ircd->uses_protect = true;
-				}
-				if (strstr(varv[i] + 7, "h"))
-				{
-					ircd->uses_halfops = true;
-				}
-			}
-			else if (!strcmp(varv[i], "GLOBOPS=1"))
+			if (!strcmp(varv[i], "GLOBOPS=1"))
 			{
 				has_globopsmod = true;
 			}
@@ -1659,18 +1670,39 @@ m_capab(struct sourceinfo *si, int parc, char *parv[])
 			if (it)
 				max_rejoindelay = atoi(it + 1);
 		}
-		TAINT_ON(strstr(parv[1], "m_invisible.so") != NULL, "invisible (m_invisible) is not presently supported correctly in atheme, and won't be due to ethical obligations");
+	}
+	else if (strcasecmp(parv[0], "CHANMODES") == 0 && parc > 1)
+	{
+		varc = sjtoken(parv[1], ' ', varv);
+		for (i = 0; i < varc; i++)
+		{
+			if (strstr(varv[i], "prefix:") != varv[i])
+				continue; // not a prefix mode
+
+			switch (varv[i][(strlen(varv[i]) - 1)])
+			{
+				case 'q':
+					ircd->uses_owner = true;
+					break;
+				case 'a':
+					ircd->uses_protect = true;
+					break;
+				case 'h':
+					ircd->uses_halfops = true;
+					break;
+			}
+		}
 	}
 	else if (strcasecmp(parv[0], "USERMODES") == 0 && parc > 1)
 	{
 		varc = sjtoken(parv[1], ' ', varv);
 		for (i = 0; i < varc; i++)
 		{
-			if (!strcmp(varv[i], "hidechans=I"))
+			if (!strcmp(varv[i], "simple:hidechans=I"))
 				has_hidechansmod = true;
-			else if (!strcmp(varv[i], "hideoper=H"))
+			else if (!strcmp(varv[i], "simple:hideoper=H"))
 				has_hideopermod = true;
-			else if (!strcmp(varv[i], "servprotect=k"))
+			else if (!strcmp(varv[i], "simple:servprotect=k"))
 				has_servprotectmod = true;
 		}
 	}
@@ -1765,11 +1797,12 @@ mod_init(struct module *const restrict m)
 
 	ircd = &InspIRCd;
 
-	pcommand_add("PING", m_ping, 1, MSRC_USER | MSRC_SERVER);
+	pcommand_add("PING", m_ping, 1, MSRC_SERVER);
 	pcommand_add("PONG", m_pong, 1, MSRC_SERVER);
 	pcommand_add("PRIVMSG", m_privmsg, 2, MSRC_USER | MSRC_SERVER);
 	pcommand_add("NOTICE", m_notice, 2, MSRC_USER | MSRC_SERVER | MSRC_UNREG);
 	pcommand_add("FJOIN", m_fjoin, 3, MSRC_SERVER);
+	pcommand_add("IJOIN", m_ijoin, 2, MSRC_USER);
 	pcommand_add("PART", m_part, 1, MSRC_USER);
 	pcommand_add("NICK", m_nick, 2, MSRC_USER);
 	pcommand_add("UID", m_uid, 10, MSRC_SERVER);
@@ -1781,14 +1814,12 @@ mod_init(struct module *const restrict m)
 	pcommand_add("SAVE", m_save, 2, MSRC_SERVER);
 	pcommand_add("SQUIT", m_squit, 1, MSRC_USER | MSRC_SERVER);
 	pcommand_add("RSQUIT", m_rsquit, 1, MSRC_USER);
-	pcommand_add("SERVER", m_server, 4, MSRC_UNREG | MSRC_SERVER);
+	pcommand_add("SERVER", m_server, 3, MSRC_UNREG | MSRC_SERVER);
 	pcommand_add("STATS", m_stats, 2, MSRC_USER);
 	pcommand_add("MOTD", m_motd, 1, MSRC_USER);
 	pcommand_add("ADMIN", m_admin, 1, MSRC_USER);
-	pcommand_add("FTOPIC", m_ftopic, 4, MSRC_SERVER);
-	pcommand_add("JOIN", m_join, 1, MSRC_USER);
+	pcommand_add("FTOPIC", m_ftopic, 4, MSRC_USER | MSRC_SERVER);
 	pcommand_add("ERROR", m_error, 1, MSRC_UNREG | MSRC_SERVER);
-	pcommand_add("TOPIC", m_topic, 2, MSRC_USER);
 	pcommand_add("FIDENT", m_fident, 1, MSRC_USER);
 	pcommand_add("FHOST", m_fhost, 1, MSRC_USER);
 	pcommand_add("IDLE", m_idle, 1, MSRC_USER);

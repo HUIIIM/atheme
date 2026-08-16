@@ -114,6 +114,11 @@ POTENTIAL COMPATIBILITY BREAKAGE
   changed to `user:exceedlimits`, and `user:regnolimit` now refers to the
   ability to use the nickserv command `REGNOLIMIT`.
 
+- The NickServ VHOST command now exclusively supports the modern ON/OFF syntax
+  introduced in Atheme 5.0. In the unlikely case you operate any bots managing
+  user vhosts that are still using the pre-2009 syntax, you may wish to update
+  them; consult `help/default/nickserv/vhost` for details.
+
 Security
 --------
 - Services now accepts email addresses that may contain shell metacharacters.
@@ -213,6 +218,7 @@ NickServ
 - Blame a specific channel when a NickServ `REGAIN` fails due to a channel ban
 - NickServ `RETURN` now enables the `HIDEMAIL` flag if the email was changed
   (unless the flag is unset by default)
+- NickServ `VHOST` no longer supports legacy pre-v5.0 command syntax
 
 IRCds
 -----
@@ -280,6 +286,9 @@ Password Cryptography
 - Add verify-only `rawsha2-256` and `rawsha2-512` modules to verify more
   password hashes from other sources.
 - Warn admin if no encryption-capable crypto modules are loaded
+- Services will now refuse to set new account passwords if they cannot be
+  encrypted, and refuse new account registrations if the password cannot be
+  encrypted. You MUST load an encryption-capable crypto provider.
 - Generating new encrypted passwords is now much more efficient
 - Try encrypting a password with each module in turn instead of giving up
 - Indicating whether a password needs re-encrypting is now much more efficient
@@ -988,7 +997,7 @@ ircd protocol
 
 chanserv
 --------
-- split out SET into seperate modules for each SET command. chanserv/set
+- split out SET into separate modules for each SET command. chanserv/set
   is now a "meta-module" that depends on all the set_* modules.
 
 hostserv
@@ -1004,7 +1013,7 @@ infoserv
 
 nickserv
 --------
-- split out SET into seperate modules for each SET command. nickserv/set
+- split out SET into separate modules for each SET command. nickserv/set
   is now a "meta-module" that depends on all the set_* modules.
 - added cracklib module that checks users' passwords on REGISTER and lets
   them know if the password is secure or not. You can have it just warn
@@ -1648,7 +1657,7 @@ documentation
 
 other
 -----
-- Split expiry setting into seperate nickserv::expiry and chanserv::expiry.
+- Split expiry setting into separate nickserv::expiry and chanserv::expiry.
 - Make expiry settings of 0 work more consistently as "do not expire
   anything", and still update last used times.
 - Add graphtastical contrib module, creates files to be processed with

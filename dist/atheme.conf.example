@@ -119,7 +119,7 @@
  * Charybdis IRCd                               protocol/charybdis
  * ChatIRCd                                     protocol/chatircd1.1
  * DreamForge 4.6.7 or later                    protocol/dreamforge
- * InspIRCd 2.x and 3.x                         protocol/inspircd
+ * InspIRCd 3.x and 4.x                         protocol/inspircd
  * ircd-ratbox 2.0 and later                    protocol/ratbox
  * IRCNet ircd (ircd 2.11)                      protocol/ircnet
  * solanum                                      protocol/solanum
@@ -964,12 +964,25 @@ loadmodule "groupserv/set_url";
 
 
 
-/* XMLRPC server module.
+/* JSON-RPC server module.
+ *
+ * The JSON-RPC handler requires "misc/httpd" to be loaded as it merely
+ * registers a path handler for JSON-RPC. The path used for JSON-RPC is
+ * /jsonrpc
+ *
+ * JSON-RPC handler for the httpd               transport/jsonrpc
+ */
+#loadmodule "transport/jsonrpc";
+
+
+
+/* XML-RPC server module.
  *
  * The XML-RPC handler requires "misc/httpd" to be loaded as it merely
- * registers a path handler for XML-RPC. The path used for XML-RPC is /xmlrpc.
+ * registers a path handler for XML-RPC. The path used for XML-RPC is
+ * /xmlrpc
  *
- * XMLRPC handler for the httpd                 transport/xmlrpc
+ * XML-RPC handler for the httpd                transport/xmlrpc
  */
 #loadmodule "transport/xmlrpc";
 
@@ -2481,8 +2494,8 @@ proxyscan {
 
 /* HTTP server configuration.
  *
- * The HTTP server in Services is used for serving XMLRPC requests. It can
- * also serve static documents and statistics pages.
+ * The HTTP server in services is used for serving RPC requests.
+ * It can also serve static documents and statistics pages.
  */
 httpd {
 
@@ -2512,6 +2525,42 @@ httpd {
 	 * The port that the HTTP server will listen on.
 	 */
 	port = 8080;
+};
+
+/* JSON-RPC configuration.
+ *
+ * This controls configuration specific to serving JSON-RPC requests.
+ */
+jsonrpc {
+
+	/* (*) log_full_info
+	 *
+	 * This controls whether the IP address is always logged interactively
+	 * (to a logfile{} that is an IRC channel) for commands executed via
+	 * JSON-RPC.
+	 *
+	 * It is always logged non-interactively (to a logfile{} that is on
+	 * disk).
+	 */
+	#log_full_info;
+};
+
+/* XML-RPC configuration.
+ *
+ * This controls configuration specific to serving XML-RPC requests.
+ */
+xmlrpc {
+
+	/* (*) log_full_info
+	 *
+	 * This controls whether the IP address is always logged interactively
+	 * (to a logfile{} that is an IRC channel) for commands executed via
+	 * XML-RPC.
+	 *
+	 * It is always logged non-interactively (to a logfile{} that is on
+	 * disk).
+	 */
+	#log_full_info;
 };
 
 /* Password-based login attempt throttling configuration.
@@ -2747,6 +2796,14 @@ general {
 	 *                   verbose_ops, none.
 	 */
 	cflags = { guard; verbose; };
+
+	/* (*) gflags
+	 *
+	 * The default flags to set for groups upon registration.
+	 *
+	 * Valid values are: neverop, open, public, none.
+	 */
+	gflags = { none; };
 
 	/* (*) raw
 	 *

@@ -90,7 +90,7 @@ ts6_server_login(void)
 
 	me.bursting = true;
 
-	sts("CAPAB :QS EX IE KLN UNKLN ENCAP TB SERVICES EUID EOPMOD MLOCK");
+	sts("CAPAB :QS EX IE KLN UNKLN ENCAP TB SERVICES EUID EOPMOD MLOCK STAG");
 	sts("SERVER %s 1 :%s%s", me.name, me.hidden ? "(H) " : "", me.desc);
 	sts("SVINFO %d 3 0 :%lu", ircd->uses_uid ? 6 : 5,
 			(unsigned long)CURRTIME);
@@ -591,7 +591,7 @@ m_mlock(struct sourceinfo *si, int parc, char *parv[])
 		return;
 	}
 
-	time_t ts = atol(parv[0]);
+	time_t ts = atoll(parv[0]);
 	if (ts > c->ts)
 		return;
 
@@ -619,7 +619,7 @@ static void
 m_tb(struct sourceinfo *si, int parc, char *parv[])
 {
 	struct channel *c = channel_find(parv[0]);
-	time_t ts = atol(parv[1]);
+	time_t ts = atoll(parv[1]);
 
 	if (c == NULL)
 		return;
@@ -650,8 +650,8 @@ m_etb(struct sourceinfo *si, int parc, char *parv[])
 			!(si->s->flags & SF_EOB) && c->topic != NULL)
 		return;
 
-	channelts = atol(parv[0]);
-	topicts = atol(parv[2]);
+	channelts = atoll(parv[0]);
+	topicts = atoll(parv[2]);
 	if (c->topic == NULL || channelts < c->ts || (channelts == c->ts && topicts > c->topicts))
 		handle_topic_from(si, c, parv[3], topicts, parv[parc - 1]);
 }
@@ -718,6 +718,12 @@ m_notice(struct sourceinfo *si, int parc, char *parv[])
 }
 
 static void
+m_tagmsg(struct sourceinfo *si, int parc, char *parv[])
+{
+	// no-op; nothing in atheme currently cares about incoming TAGMSG
+}
+
+static void
 m_sjoin(struct sourceinfo *si, int parc, char *parv[])
 {
 	// -> :proteus.malkier.net SJOIN 1073516550 #shrike +tn :@sycobuny @+rakaur
@@ -732,7 +738,7 @@ m_sjoin(struct sourceinfo *si, int parc, char *parv[])
 
 	// :origin SJOIN ts chan modestr [key or limits] :users
 	c = channel_find(parv[1]);
-	ts = atol(parv[0]);
+	ts = atoll(parv[0]);
 
 	if (!c)
 	{
@@ -835,7 +841,7 @@ m_join(struct sourceinfo *si, int parc, char *parv[])
 
 	// :user JOIN ts chan modestr [key or limits]
 	c = channel_find(parv[1]);
-	ts = atol(parv[0]);
+	ts = atoll(parv[0]);
 
 	if (!c)
 	{
@@ -950,7 +956,7 @@ m_nick(struct sourceinfo *si, int parc, char *parv[])
 
 		slog(LG_DEBUG, "m_nick(): new user on `%s': %s", s->name, parv[0]);
 
-		u = user_add(parv[0], parv[4], parv[5], NULL, NULL, NULL, parv[7], s, atoi(parv[2]));
+		u = user_add(parv[0], parv[4], parv[5], NULL, NULL, NULL, parv[7], s, atoll(parv[2]));
 		if (u == NULL)
 			return;
 
@@ -975,7 +981,7 @@ m_nick(struct sourceinfo *si, int parc, char *parv[])
 
 		slog(LG_DEBUG, "m_nick(): nickname change from `%s': %s", si->su->nick, parv[0]);
 
-		if (user_changenick(si->su, parv[0], atoi(parv[1])))
+		if (user_changenick(si->su, parv[0], atoll(parv[1])))
 			return;
 
 		/* It could happen that our PING arrived late and the
@@ -1006,7 +1012,7 @@ m_uid(struct sourceinfo *si, int parc, char *parv[])
 		s = si->s;
 		slog(LG_DEBUG, "m_uid(): new user on `%s': %s", s->name, parv[0]);
 
-		u = user_add(parv[0], parv[4], parv[5], NULL, parv[6], parv[7], parv[8], s, atoi(parv[2]));
+		u = user_add(parv[0], parv[4], parv[5], NULL, parv[6], parv[7], parv[8], s, atoll(parv[2]));
 		if (u == NULL)
 			return;
 
@@ -1050,7 +1056,7 @@ m_euid(struct sourceinfo *si, int parc, char *parv[])
 			parv[7],				// uid
 			parv[parc - 1],				// gecos
 			s,					// object parent (server)
-			atoi(parv[2]));				// hopcount
+			atoll(parv[2]));			// hopcount
 		if (u == NULL)
 			return;
 
@@ -1410,7 +1416,7 @@ m_signon(struct sourceinfo *si, int parc, char *parv[])
 		return;
 
 	// NICK
-	if (user_changenick(u, parv[0], atoi(parv[3])))
+	if (user_changenick(u, parv[0], atoll(parv[3])))
 		return;
 
 	handle_nickchange(u); // If they're logging out, this will bug them about identifying. Or something.
@@ -1442,6 +1448,7 @@ m_capab(struct sourceinfo *si, int parc, char *parv[])
 	use_tb = false;
 	use_eopmod = false;
 	use_mlock = false;
+	ircd->flags &= ~IRCD_MESSAGE_TAGS;
 	for (p = strtok(parv[0], " "); p != NULL; p = strtok(NULL, " "))
 	{
 		if (!irccasecmp(p, "EUID"))
@@ -1468,6 +1475,11 @@ m_capab(struct sourceinfo *si, int parc, char *parv[])
 		{
 			slog(LG_DEBUG, "m_capab(): uplink supports MLOCK, enabling support.");
 			use_mlock = true;
+		}
+		if (!irccasecmp(p, "STAG"))
+		{
+			slog(LG_DEBUG, "m_capab(): uplink supports message tags, enabling support.");
+			ircd->flags |= IRCD_MESSAGE_TAGS;
 		}
 	}
 
@@ -1570,6 +1582,7 @@ mod_init(struct module *const restrict m)
 	pcommand_add("PONG", m_pong, 1, MSRC_SERVER);
 	pcommand_add("PRIVMSG", m_privmsg, 2, MSRC_USER);
 	pcommand_add("NOTICE", m_notice, 2, MSRC_UNREG | MSRC_USER | MSRC_SERVER);
+	pcommand_add("TAGMSG", m_tagmsg, 1, MSRC_USER);
 	pcommand_add("SJOIN", m_sjoin, 4, MSRC_SERVER);
 	pcommand_add("PART", m_part, 1, MSRC_USER);
 	pcommand_add("NICK", m_nick, 2, MSRC_USER | MSRC_SERVER);

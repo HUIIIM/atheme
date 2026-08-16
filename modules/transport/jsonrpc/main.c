@@ -10,8 +10,16 @@
 #include <atheme.h>
 #include "jsonrpclib.h"
 
+// Imported from other modules
 static mowgli_list_t *httpd_path_handlers = NULL;
+
+// Configuration for this module
+static mowgli_list_t conf_jsonrpc_table;
+static bool jsonrpc_log_full_info = false;
+
+// Miscellaneous state for this module
 static mowgli_patricia_t *json_methods = NULL;
+static mowgli_node_t *jsonrpc_path_node = NULL;
 
 void
 jsonrpc_register_method(const char *method_name, jsonrpc_method_fn method)
@@ -29,6 +37,32 @@ jsonrpc_method_fn
 get_json_method(const char *method_name)
 {
 	return mowgli_patricia_retrieve(json_methods, method_name);
+}
+
+static const char *
+jsonrpc_format_sourceinfo(struct sourceinfo *si, bool full)
+{
+	static char buf[BUFSIZE];
+
+	struct myuser *mu = si->smu;
+
+	if (full || jsonrpc_log_full_info)
+		(void) snprintf(buf, sizeof buf, "<%s>%s%s%s%s%s%s",
+		                si->v->description,
+		                si->sourcedesc == NULL ? "" : " [",
+		                si->sourcedesc == NULL ? "" : si->sourcedesc,
+		                si->sourcedesc == NULL ? "" : "]",
+		                mu == NULL ? "" : " (",
+		                mu == NULL ? "" : entity(mu)->name,
+		                mu == NULL ? "" : ")");
+	else
+		(void) snprintf(buf, sizeof buf, "<%s>%s%s%s",
+		                si->v->description,
+		                mu == NULL ? "" : " (",
+		                mu == NULL ? "" : entity(mu)->name,
+		                mu == NULL ? "" : ")");
+
+	return buf;
 }
 
 static void
@@ -103,9 +137,10 @@ jsonrpc_command_success_nodata(struct sourceinfo *si, const char *message)
 
 static struct sourceinfo_vtable jsonrpc_vtable = {
 	.description        = "jsonrpc",
-	.cmd_fail           = jsonrpc_command_fail,
-	.cmd_success_string = jsonrpc_command_success_string,
-	.cmd_success_nodata = jsonrpc_command_success_nodata
+	.format             = &jsonrpc_format_sourceinfo,
+	.cmd_fail           = &jsonrpc_command_fail,
+	.cmd_success_string = &jsonrpc_command_success_string,
+	.cmd_success_nodata = &jsonrpc_command_success_nodata,
 };
 
 // These taken from modules/transport/xmlrpc/main.c
@@ -324,7 +359,7 @@ jsonrpcmethod_command(void *conn, mowgli_list_t *params, char *id)
 	svs = service_find(service);
 	if ((svs == NULL && (svs = service_find_nick(service)) == NULL) || svs->commands == NULL)
 	{
-		slog(LG_DEBUG, "xmlrpcmethod_command(): invalid service %s", service);
+		slog(LG_DEBUG, "jsonrpcmethod_command(): invalid service %s", service);
 		jsonrpc_failure_string(conn, fault_nosuch_source, "Invalid service name.", id);
 		return 0;
 	}
@@ -645,50 +680,49 @@ static void
 handle_request(struct connection *cptr, void *requestbuf)
 {
 	jsonrpc_process(requestbuf, cptr);
-
-	return;
 }
-
-static struct path_handler handle_jsonrpc = { NULL, handle_request };
 
 static void
 mod_init(struct module *const restrict m)
 {
+	static struct path_handler path_handler = {
+		.path    = "/jsonrpc",
+		.handler = &handle_request,
+	};
+
 	MODULE_TRY_REQUEST_SYMBOL(m, httpd_path_handlers, "misc/httpd", "httpd_path_handlers")
 
-	handle_jsonrpc.path = "/jsonrpc";
-	mowgli_node_add(&handle_jsonrpc, mowgli_node_create(), httpd_path_handlers);
+	add_subblock_top_conf("JSONRPC", &conf_jsonrpc_table);
+	add_bool_conf_item("LOG_FULL_INFO", &conf_jsonrpc_table, 0, &jsonrpc_log_full_info, false);
 
 	json_methods = mowgli_patricia_create(strcasecanon);
 
 	jsonrpc_register_method("atheme.login", jsonrpcmethod_login);
 	jsonrpc_register_method("atheme.logout", jsonrpcmethod_logout);
 	jsonrpc_register_method("atheme.command", jsonrpcmethod_command);
-
 	jsonrpc_register_method("atheme.privset", jsonrpcmethod_privset);
 	jsonrpc_register_method("atheme.ison", jsonrpcmethod_ison);
 	jsonrpc_register_method("atheme.metadata", jsonrpcmethod_metadata);
 
+	jsonrpc_path_node = mowgli_node_create();
+	mowgli_node_add(&path_handler, jsonrpc_path_node, httpd_path_handlers);
 }
 
 static void
 mod_deinit(const enum module_unload_intent ATHEME_VATTR_UNUSED intent)
 {
-	mowgli_node_t *n;
+	del_conf_item("LOG_FULL_INFO", &conf_jsonrpc_table);
+	del_top_conf("JSONRPC");
 
 	jsonrpc_unregister_method("atheme.login");
 	jsonrpc_unregister_method("atheme.logout");
 	jsonrpc_unregister_method("atheme.command");
-
 	jsonrpc_unregister_method("atheme.privset");
 	jsonrpc_unregister_method("atheme.ison");
 	jsonrpc_unregister_method("atheme.metadata");
 
-	if ((n = mowgli_node_find(&handle_jsonrpc, httpd_path_handlers)) != NULL)
-	{
-		mowgli_node_delete(n, httpd_path_handlers);
-		mowgli_node_free(n);
-	}
+	mowgli_node_delete(jsonrpc_path_node, httpd_path_handlers);
+	mowgli_node_free(jsonrpc_path_node);
 }
 
 SIMPLE_DECLARE_MODULE_V1("transport/jsonrpc", MODULE_UNLOAD_CAPABILITY_OK)

@@ -50,6 +50,7 @@ AC_DEFUN([ATHEME_CHECK_BUILD_REQUIREMENTS], [
     AC_CHECK_HEADERS([time.h], [], [], [])
     AC_CHECK_HEADERS([unistd.h], [], [], [])
 
+    AC_CHECK_FUNCS([atoll], [], [ATHEME_REQUIRED_FUNC_MISSING])
     AC_CHECK_FUNCS([consttime_memequal], [], [])
     AC_CHECK_FUNCS([dup2], [], [ATHEME_REQUIRED_FUNC_MISSING])
     AC_CHECK_FUNCS([execve], [], [ATHEME_REQUIRED_FUNC_MISSING])
@@ -93,6 +94,7 @@ AC_DEFUN([ATHEME_CHECK_BUILD_REQUIREMENTS], [
     AC_CHECK_FUNCS([strtold], [], [ATHEME_REQUIRED_FUNC_MISSING])
     AC_CHECK_FUNCS([strtoul], [], [ATHEME_REQUIRED_FUNC_MISSING])
     AC_CHECK_FUNCS([strtoull], [], [ATHEME_REQUIRED_FUNC_MISSING])
+    AC_CHECK_FUNCS([timespec_get], [], [])
     AC_CHECK_FUNCS([timingsafe_bcmp], [], [])
     AC_CHECK_FUNCS([timingsafe_memcmp], [], [])
     AC_CHECK_FUNCS([vsnprintf], [], [ATHEME_REQUIRED_FUNC_MISSING])

@@ -140,18 +140,13 @@ myuser_add_id(const char *id, const char *name, const char *pass, const char *em
 	}
 	mu->language = NULL; /* default */
 
-	/* If it's already crypted, don't touch the password. Otherwise,
-	 * use set_password() to initialize it. Why? Because set_password
-	 * will move the user to encrypted passwords if possible. That way,
-	 * new registers are immediately protected and the database is
-	 * immediately converted the first time we start up with crypto.
-	 */
-	if (flags & MU_CRYPTPASS)
-		mowgli_strlcpy(mu->pass, pass, sizeof mu->pass);
-	else
-		set_password(mu, pass);
-
 	myentity_put(entity(mu));
+
+	/* If it's already encrypted, don't touch the password. Otherwise,
+	 * try to encrypt it, or continue to store it plain if this fails.
+	 */
+	if ((mu->flags & MU_CRYPTPASS) || (! set_password(mu, pass)))
+		(void) mowgli_strlcpy(mu->pass, pass, sizeof mu->pass);
 
 	if ((soper = soper_find_named(entity(mu)->name)) != NULL
 		|| (soper = soper_find_eid(entity(mu)->id)) != NULL)
@@ -1002,7 +997,7 @@ mychan_add(char *name)
 	struct mychan *mc;
 
 	return_val_if_fail(name != NULL, NULL);
-	return_val_if_fail((mc = mychan_find(name)) == NULL, mc);
+	return_val_if_fail((mc = mychan_find(name)) == NULL, NULL);
 
 	if (!(runflags & RF_STARTING))
 		slog(LG_DEBUG, "mychan_add(): %s", name);
@@ -1679,7 +1674,7 @@ chanacs_find_host_by_user(struct mychan *mychan, struct user *u, unsigned int le
 	mowgli_node_t *n;
 	struct chanacs *ca;
 
-	return_val_if_fail(mychan != NULL && u != NULL, 0);
+	return_val_if_fail(mychan != NULL && u != NULL, NULL);
 
 	for (n = next_matching_host_chanacs(mychan, u, mychan->chanacs.head); n != NULL; n = next_matching_host_chanacs(mychan, u, n->next))
 	{
@@ -1834,8 +1829,8 @@ chanacs_open(struct mychan *mychan, struct myentity *mt, const char *hostmask, b
 	struct chanacs *ca;
 
 	/* wrt the second assert: only one of mu or hostmask can be not-NULL --nenolod */
-	return_val_if_fail(mychan != NULL, false);
-	return_val_if_fail((mt != NULL && hostmask == NULL) || (mt == NULL && hostmask != NULL), false);
+	return_val_if_fail(mychan != NULL, NULL);
+	return_val_if_fail((mt != NULL && hostmask == NULL) || (mt == NULL && hostmask != NULL), NULL);
 
 	if (mt != NULL)
 	{
